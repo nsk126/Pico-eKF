@@ -1,9 +1,0 @@
-{
-    "files.associations": {
-        "stdlib.h": "c",
-        "gpio.h": "c",
-        "stdio.h": "c",
-        "multicore.h": "c"
-    },
-    "C_Cpp.errorSquiggles": "Disabled"
-}
