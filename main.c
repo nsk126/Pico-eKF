@@ -3,9 +3,11 @@
 #include "hardware/i2c.h"
 #include "pico/multicore.h"
 #include "pico/binary_info.h"
+#include "hardware/dma.h"
+#include "math.h"
 
 #define ADDR 0x68
-
+#define RAD_TO_DEG 57.295779513
 /**
  * @brief LIST OF FUNCTIONS
  * gpio_init
@@ -20,47 +22,51 @@ static int addr = 0x68;
 #ifdef i2c_default
 
 static bool reserved_addr(uint8_t addr);
-
 static void mpu6050_reset(uint8_t addr);
-
 static void mpu6050_read_raw(int16_t accel[3], int16_t gyro[3], int16_t *temp);
-
 static void i2c_detect(uint8_t addr);
-
 static void i2c_default_pins();
 
 #endif
 
 int16_t acceleration[3], gyro[3], temp;
 
+bool repeating_timer_callback(struct repeating_timer *t){
+
+    double ax = (double) (acceleration[0]/16384.0);
+    double ay = (double) (acceleration[1]/16384.0);
+    double az = (double) (acceleration[2]/16384.0);
+
+    double gx = (double) (gyro[0]/131.0);
+    double gy = (double) (gyro[1]/131.0);
+    double gz = (double) (gyro[2]/131.0);
+
+    double phi = atan(ay/az) * RAD_TO_DEG;
+    double theta = atan(-ax/sqrt(pow(ay,2) + pow(az,2))) * RAD_TO_DEG;
+    // double theta2 = asin(ax/9.81) * RAD_TO_DEG; DO NOT USE
+    
+    printf("\033c"); // Character to clear terminal buffer
+    printf("phi{%.2f} | theta{%.2f}\n",phi,theta);
+
+    
+    return true;
+}
+
 void Core_2(){
 
-    sleep_ms(3000);
 
     /**
      * @brief 
      * Gyro 8Khz
      * Accel 1Khz
-     * 
      */
     
+    struct repeating_timer timer;
+    add_repeating_timer_ms(1, repeating_timer_callback, NULL, &timer);
 
-    while (true) {
-        
-        double ax = (double) (acceleration[0]/16384.0);
-        double ay = (double) (acceleration[1]/16384.0);
-        double az = (double) (acceleration[2]/16384.0);
-
-        double gx = (double) (gyro[0]/131.0);
-        double gy = (double) (gyro[1]/131.0);
-        double gz = (double) (gyro[2]/131.0);
-
-        
-
-
-        // printf("| %.2f | %.2f | %.2f | %.2f | %.2f | %.2f | \n", ax, ay, az, gx, gy, gz);
-        
-        // sleep_ms(200);
+    while (1)
+    {
+        tight_loop_contents();
     }
     
     
@@ -153,7 +159,7 @@ static void mpu6050_read_raw(int16_t accel[3], int16_t gyro[3], int16_t *temp) {
     uint8_t buffer[6];
 
     // Start reading acceleration registers from register 0x3B for 6 bytes
-    uint8_t val = 0x3B;
+    uint8_t val = 0x3B; 
     i2c_write_blocking(i2c_default, addr, &val, 1, true); // true to keep master control of bus
     i2c_read_blocking(i2c_default, addr, buffer, 6, false);
 
@@ -173,7 +179,9 @@ static void mpu6050_read_raw(int16_t accel[3], int16_t gyro[3], int16_t *temp) {
 
     // Now temperature from reg 0x41 for 2 bytes
     // The register is auto incrementing on each read
+
     val = 0x41;
+    
     i2c_write_blocking(i2c_default, addr, &val, 1, true);
     i2c_read_blocking(i2c_default, addr, buffer, 2, false);  // False - finished with bus
 
@@ -226,3 +234,4 @@ static void i2c_default_pins(){
     bi_decl(bi_2pins_with_func(PICO_DEFAULT_I2C_SDA_PIN, PICO_DEFAULT_I2C_SCL_PIN, GPIO_FUNC_I2C));
 
 }
+
