@@ -45,8 +45,8 @@ bool repeating_timer_callback(struct repeating_timer *t){
     double theta = atan(-ax/sqrt(pow(ay,2) + pow(az,2))) * RAD_TO_DEG;
     // double theta2 = asin(ax/9.81) * RAD_TO_DEG; DO NOT USE
     
-    printf("\033c"); // Character to clear terminal buffer
-    printf("phi{%.2f} | theta{%.2f}\n",phi,theta);
+    // printf("\033c"); // Character to clear terminal buffer
+    printf("%.2f,%.2f\n",phi,theta);
 
     
     return true;
