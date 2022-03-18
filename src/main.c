@@ -10,7 +10,9 @@
 #include "task.h"
 
 #define ADDR 0x68
+
 #define RAD_TO_DEG 57.295779513
+#define DEG_TO_RAD 0.0174533
 
 #ifdef i2c_default
 
@@ -25,6 +27,9 @@ static void i2c_default_pins();
 int16_t acceleration[3], gyro[3], temp;
 static int addr = 0x68;
 
+double f_phi = 0; 
+double f_theta = 0; 
+
 bool repeating_timer_callback(struct repeating_timer *t){
 
     double ax = (double) (acceleration[0]/16384.0);
@@ -35,17 +40,40 @@ bool repeating_timer_callback(struct repeating_timer *t){
     double gy = (double) (gyro[1]/131.0);
     double gz = (double) (gyro[2]/131.0);
 
-    double phi = atan(ay/az) * RAD_TO_DEG;
-    double theta = atan(-ax/sqrt(pow(ay,2) + pow(az,2))) * RAD_TO_DEG;
+    double a_phi = atan2(ay,az);
+    double a_theta = atan2(-ax,sqrt(pow(ay,2) + pow(az,2)));
     // double theta2 = asin(ax/9.81) * RAD_TO_DEG; DO NOT USE
+
+
+    // Body transformation test
+    // double gx_cap = gx + sin(f_phi)*tan(f_theta)*gy + cos(f_phi)*tan(f_theta)*gz;
+    // double gy_cap = cos(f_phi)*gy - sin(f_phi)*gz;
+
+    double gy_phi = f_phi + (gx * 0.001); 
+    double gy_theta = f_phi + (gy * 0.001);
+    
+    /**
+     * @brief Complementary Filer
+     * Alpha = 0.05
+     * 
+     */
+
+    double alpha = 0.05;
+
+    double f_phi = alpha * gy_phi + (1.0 - alpha) * a_phi;
+    double f_theta = alpha * gy_theta + (1.0 - alpha) * a_theta;
     
     // printf("\033c"); // Character to clear terminal buffer
-    printf("%.2f,%.2f\n",phi,theta);
+    // printf("%.2f,%.2f\n",a_phi,a_theta);
+    // printf("%.2f,%.2f\n",gy_phi,gy_theta);
+    printf("%.2f,%.2f\n",f_phi * RAD_TO_DEG,f_theta * RAD_TO_DEG);
+      
     
     return true;
 }
 
-
+// Thread running on Core-0
+// Blink thread with priority 2
 void blink(void *param){
 
     while (1)
@@ -58,6 +86,8 @@ void blink(void *param){
     }   
 }
 
+// Thread running on Core-0
+// Read MPU6050 thread with priority 1
 void mpu_read(void *param){
 
     while (1)
@@ -70,7 +100,7 @@ void mpu_read(void *param){
 
 
 // Core 1 - Main thread
-void Core_2(){
+void Core_1(){
 
     struct repeating_timer timer;
     add_repeating_timer_ms(1, repeating_timer_callback, NULL, &timer);
@@ -111,8 +141,8 @@ int main()
     gpio_init(25);
     gpio_set_dir(25,GPIO_OUT);
 
-    // Core-2 Init
-    multicore_launch_core1(Core_2);
+    // Core-1 Init
+    multicore_launch_core1(Core_1);
 
     // FreeRTOS Threads
     TaskHandle_t gLED = NULL;
@@ -121,8 +151,8 @@ int main()
     // uint32_t status = xTaskCreate(blink, "B", 256, NULL, tskIDLE_PRIORITY, &gLED);
     // status = xTaskCreate(usb_fb, "A", 256, NULL, 1, &usb_task);
 
-    uint32_t status = xTaskCreate(blink, "B", 1024, NULL, 2, &gLED);
-    status = xTaskCreate(mpu_read, "A", 1024, NULL, 1, &mpu_I2C_read);
+    uint32_t status = xTaskCreate(blink, "A", 1024, NULL, 2, &gLED);
+    status = xTaskCreate(mpu_read, "B", 1024, NULL, 1, &mpu_I2C_read);
 
     vTaskStartScheduler();
 

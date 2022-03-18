@@ -1,3 +1,5 @@
 .vscode/
 build/
 FreeRTOS-Kernel/
+src/t2.c
+src/temp.c
