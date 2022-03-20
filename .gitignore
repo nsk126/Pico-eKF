@@ -3,3 +3,7 @@ build/
 FreeRTOS-Kernel/
 src/t2.c
 src/temp.c
+eigen/
+tttt.c
+Eigen/
+src/test.cpp

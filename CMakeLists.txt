@@ -14,7 +14,7 @@ pico_sdk_init()
 
 # Tell CMake where to find the executable source file
 add_executable(${PROJECT_NAME} 
-    src/main.c
+    src/main.cpp
 )
 
 FILE(GLOB FreeRTOS_src FreeRTOS-Kernel/*.c)
@@ -33,8 +33,8 @@ target_include_directories( FreeRTOS PUBLIC
     FreeRTOS-Kernel/include
     include/
     FreeRTOS-Kernel/portable/GCC/ARM_CM0
+    eigen/   
 )
-
 # Link to pico_stdlib (gpio, time, etc. functions)
 target_link_libraries(${PROJECT_NAME} 
     pico_stdlib

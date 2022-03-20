@@ -8,6 +8,7 @@
 #include "FreeRTOS.h"
 #include "FreeRTOSConfig.h"
 #include "task.h"
+#include <iostream>
 
 #define ADDR 0x68
 
@@ -22,13 +23,69 @@ static void mpu6050_read_raw(int16_t accel[3], int16_t gyro[3], int16_t *temp);
 static void i2c_detect(uint8_t addr);
 static void i2c_default_pins();
 
+template<std::size_t N, std::size_t M, std::size_t P>
+int mult_mat(double A[N][M], double B[M][P], double C[N][P]);
+
+template<std::size_t N, std::size_t M>
+int add_mat(double A[N][M], double B[N][M], double C[N][M]);
+
+template<std::size_t N, std::size_t M>
+int mat_transpose(double A[N][M], double B[M][N]);
+
+template<std::size_t N, std::size_t M>
+int assign_mat(double A[N][M], double B[N][M]);
+
 #endif
 
 int16_t acceleration[3], gyro[3], temp;
 static int addr = 0x68;
 
-double f_phi = 0; 
-double f_theta = 0; 
+// state matrix
+double X[4][1] = {
+    {0}, // theta
+    {0}, // theta dot
+    {0}, // phi
+    {0}  // phi dot
+};
+
+// state matrix k+1
+double X_k1[4][1];
+
+// State transition matrix
+double A[4][4] = {
+    {1, 1e-3, 0, 0},
+    {0, 1, 0, 0},
+    {0, 0, 1, 1e-3},
+    {0, 0, 0, 1}
+};
+
+
+// error covariance 
+double P[4][4] = {
+    {1000, 0, 0, 0},
+    {0, 1000, 0, 0},
+    {0, 0, 1000, 0},
+    {0, 0, 0, 1000}
+};
+
+// model noise
+double Q[4][4] = {
+    {100, 0, 0, 0},
+    {0, 1, 0, 0},
+    {0, 0, 100, 0},
+    {0, 0, 0, 1}
+};
+
+//measurement noise
+double R[5][5] = {
+    {0.1, 0, 0, 0, 0},
+    {0, 0.1, 0, 0, 0},
+    {0, 0, 0.1, 0, 0},
+    {0, 0, 0, 1, 0},
+    {0, 0, 0, 0, 1}
+}
+
+
 
 bool repeating_timer_callback(struct repeating_timer *t){
 
@@ -40,8 +97,8 @@ bool repeating_timer_callback(struct repeating_timer *t){
     double gy = (double) (gyro[1]/131.0);
     double gz = (double) (gyro[2]/131.0);
 
-    double a_phi = atan2(ay,az);
-    double a_theta = atan2(-ax,sqrt(pow(ay,2) + pow(az,2)));
+    // double a_phi = atan2(ay,az);
+    // double a_theta = atan2(-ax,sqrt(pow(ay,2) + pow(az,2)));
     // double theta2 = asin(ax/9.81) * RAD_TO_DEG; DO NOT USE
 
 
@@ -49,24 +106,59 @@ bool repeating_timer_callback(struct repeating_timer *t){
     // double gx_cap = gx + sin(f_phi)*tan(f_theta)*gy + cos(f_phi)*tan(f_theta)*gz;
     // double gy_cap = cos(f_phi)*gy - sin(f_phi)*gz;
 
+    /*    Complementary Filter
+
     double gy_phi = f_phi + (gx * 0.001); 
     double gy_theta = f_phi + (gy * 0.001);
-    
-    /**
-     * @brief Complementary Filer
-     * Alpha = 0.05
-     * 
-     */
 
     double alpha = 0.05;
 
     double f_phi = alpha * gy_phi + (1.0 - alpha) * a_phi;
-    double f_theta = alpha * gy_theta + (1.0 - alpha) * a_theta;
+    double f_theta = alpha * gy_theta + (1.0 - alpha) * a_theta; 
+
+    */
+
+    // xhat(:,k) = A*xhat(:, k-1);
+    mult_mat<4,4,1>(A,X,X_k1);
+
+    //   P = A*P*A'+Q;
+
+    double A_trans[4][4];
+    mat_transpose<4,4>(A,A_trans);
+
+    double P_temp[4][4];
+    mult_mat<4,4,4>(A,P,P_temp);
+    mult_mat<4,4,4>(P_temp,A_trans,P);
+    add_mat<4,4>(P,Q,P_temp);
+    assign_mat<4,4>(P_temp,P);
+    
+    // H = [cosd(xhat(1,k-1)) 0; -sind(xhat(1,k-1)) 0 ; 0 1] e.g Jacobian
+    double H[5][4] = {
+        {sin(X[2][0]) * sin(X[0][0]), 0, -cos(X[2][0]) * cos(X[0][0]), 0},
+        {-cos(X[0][0]), 0, 0, 0},
+        {-cos(X[2][0]) * sin(X[0][0]), 0, -sin(X[2][0]) * cos(X[0][0]), 0},
+        {0, 1, 0, 0},
+        {0, 0, 0, 1}
+    }
+
+    // K = P*H'*inv(H*P*H'+R);
+    double H_trans[4][5];
+    mat_transpose<4,5>(H,H_trans);
+
+    double Temp1[5][4];
+    double Temp2[5][5];
+    double Temp3[5][5];
+
+    mult_mat<5,4,4>(H,P,Temp1);
+    mult_mat<5,4,5>(Temp1,H_trans,Temp2);
+    add_mat<5,5>(Temp2,R,Temp3);
+
+
     
     // printf("\033c"); // Character to clear terminal buffer
     // printf("%.2f,%.2f\n",a_phi,a_theta);
     // printf("%.2f,%.2f\n",gy_phi,gy_theta);
-    printf("%.2f,%.2f\n",f_phi * RAD_TO_DEG,f_theta * RAD_TO_DEG);
+    // printf("%.2f,%.2f\n",f_phi * RAD_TO_DEG,f_theta * RAD_TO_DEG);
       
     
     return true;
@@ -261,4 +353,83 @@ static void i2c_default_pins(){
     // Make the I2C pins available to picotool
     bi_decl(bi_2pins_with_func(PICO_DEFAULT_I2C_SDA_PIN, PICO_DEFAULT_I2C_SCL_PIN, GPIO_FUNC_I2C));
 
+}
+
+template<std::size_t N, std::size_t M, std::size_t P>
+int mult_mat(double A[N][M], double B[M][P], double C[N][P]) {
+    
+    // int C[N][P];
+
+    for (int n = 0; n < N; n++) {
+        for (int p = 0; p < P; p++) {
+            double num = 0;
+            for (int m = 0; m < M; m++) {
+                num += A[n][m] * B[m][p];
+            }
+            C[n][p] = num;
+        }
+    }
+
+    return 0;
+}
+
+template<std::size_t N, std::size_t M>
+int mat_transpose(double A[N][M], double B[M][N]){
+
+    for (size_t i = 0; i < M; i++)
+    {
+        for (size_t j = 0; j < N; j++)
+        {
+            B[j][i] = A[i][j];
+            printf("%.2f\t");
+        }
+        printf("\n");
+    }
+    
+}
+
+template<std::size_t N, std::size_t M>
+int add_mat(double A[N][M], double B[N][M], double C[N][M]){
+
+    for (size_t i = 0; i < N; i++)
+    {
+        for (size_t j = 0; j < M; j++)
+        {
+            C[i][j] = A[i][j] + B[i][j];
+        }
+        
+    }
+    
+}
+
+template<std::size_t N, std::size_t M>
+int assign_mat(double A[N][M], double B[N][M]){
+   
+    for (size_t i = 0; i < N; i++)
+    {
+        for (size_t j = 0; j < M; j++)
+        {
+            B[i][j] = A[i][j];
+        }
+        
+    }
+}
+
+template<std::size_t N, std::size_t M>
+int inv_mat(double A[N][M], double B[N][M]){
+    if (N == M)
+    {
+        double det;
+
+        for(int i = 0; i < M; i++){
+
+            // det += (mat[0][i] * (mat[1][(i+1)%3] * mat[2][(i+2)%3] - mat[1][(i+2)%3] * mat[2][(i+1)%3]));
+            // change this
+        }
+
+        
+        return 0;
+    }   
+
+    return -1;
 }
