@@ -24,139 +24,28 @@ static void i2c_default_pins();
 
 #endif
 
-template<std::size_t N, std::size_t M, std::size_t P>
-int mult_mat(double A[N][M], double B[M][P], double C[N][P]);
-
-template<std::size_t N, std::size_t M>
-int add_mat(double A[N][M], double B[N][M], double C[N][M]);
-
-template<std::size_t N, std::size_t M>
-int sub_mat(double A[N][M], double B[N][M], double C[N][M]);
-
-template<std::size_t N, std::size_t M>
-int mat_transpose(double A[N][M], double B[M][N]);
-
-template<std::size_t N, std::size_t M>
-int assign_mat(double A[N][M], double B[N][M]);
-
-template<std::size_t N, std::size_t M>
-int inv_mat(double A[N][M], double B[N][M]);
-
-template<std::size_t N, std::size_t M>
-int print_mat(double A[N][M]);
-
-template<std::size_t N>
-void getCfactor(double M[N][N], double t[N][N], int p, int q, int n) {
-    
-    int i = 0, j = 0;
-    for (int r= 0; r< n; r++) {
-        for (int c = 0; c< n; c++){
-            if (r != p && c != q) { 
-                t[i][j++] = M[r][c]; //If row is filled increase r index and reset c index
-                if (j == n - 1) {
-                    j = 0; i++;
-                }
-            }
-        }
-    }
-}
-
-template<std::size_t N>
-double DET(double M[N][N], int n){
-   double D = 0;
-   if (n == 1){
-      return M[0][0];
-   }
-   double t[N][N]; //store cofactors
-   int s = 1; //store sign multiplier //
-//    To Iterate each element of first row
-   for (int f = 0; f < n; f++) {
-      //For Getting Cofactor of M[0][f] do getCfactor(M, t, 0, f, n); D += s * M[0][f] * DET(t, n - 1);
-      getCfactor<N>(M, t, 0, f, n); 
-      D += s * M[0][f] * DET<N>(t, n - 1);
-      s = -s;
-   }
-   return D;
-}
-
-template<std::size_t N>
-void ADJ(double M[N][N],double adj[N][N]){
-   if (N == 1) {
-      adj[0][0] = 1; return;
-   }
-   int s = 1;
-   double t[N][N];
-
-   for (int i=0; i<N; i++) {
-      for (int j=0; j<N; j++) {
-         //To get cofactor of M[i][j]
-         getCfactor<N>(M, t, i, j, N);
-         s = ((i+j)%2==0)? 1: -1; //sign of adj[j][i] positive if sum of row and column indexes is even.
-         adj[j][i] = (s)*(DET<N>(t, N-1)); //Interchange rows and columns to get the transpose of the cofactor matrix
-      }
-   }
-}
-
-template<std::size_t N>
-bool INV(double M[N][N], double inv[N][N]) {
-   double det = DET<N>(M, N);
-   if (det == 0) {
-      return false;
-   }
-   double adj[N][N]; ADJ<N>(M, adj);
-   for (int i=0; i<N; i++) for (int j=0; j<N; j++) inv[i][j] = adj[i][j]/float(det);
-   return true;
-}
-
 int16_t acceleration[3], gyro[3], temp;
 static int addr = 0x68;
 
-// state matrix
-double X[4][1] = {
-    {0}, // theta
-    {0}, // theta dot
-    {0}, // phi
-    {0}  // phi dot
-};
+double theta = 0; 
+double theta_dot = 0;
+double phi = 0;
+double phi_dot = 0;
 
-// state matrix k+1
-double X_k1[4][1];
+double roll=0,pitch=0,yaw=0;
 
-// State transition matrix
-double A[4][4] = {
-    {1, 0.001, 0, 0},
-    {0, 1, 0, 0},
-    {0, 0, 1, 0.001},
-    {0, 0, 0, 1}
-};
+double P1 = 1000;
+double P2 = 1000;
+double P3 = 1000;
+double P4 = 1000;
 
+double Q1 = 100;
+double Q2 = 1;
+double Q3 = 100;
+double Q4 = 1;
 
-// error covariance 
-double P[4][4] = {
-    {1000, 0, 0, 0},
-    {0, 1000, 0, 0},
-    {0, 0, 1000, 0},
-    {0, 0, 0, 1000}
-};
-
-// model noise
-double Q[4][4] = {
-    {100, 0, 0, 0},
-    {0, 10, 0, 0},
-    {0, 0, 100, 0},
-    {0, 0, 0, 10}
-};
-
-//measurement noise
-double R[5][5] = {
-    {100, 0, 0, 0, 0},
-    {0, 100, 0, 0, 0},
-    {0, 0, 100, 0, 0},
-    {0, 0, 0, 10, 0},
-    {0, 0, 0, 0, 10}
-};
-
-
+// 1Khz repeating timer
+double f_phi ,f_theta;
 
 bool repeating_timer_callback(struct repeating_timer *t){
 
@@ -168,141 +57,37 @@ bool repeating_timer_callback(struct repeating_timer *t){
     double gy = (double) (gyro[1]/131.0);
     double gz = (double) (gyro[2]/131.0);
 
-    // double a_phi = atan2(ay,az);
-    // double a_theta = atan2(-ax,sqrt(pow(ay,2) + pow(az,2)));
+    // Accel in g & Gyro in deg/s
+
+    double a_phi = atan2(ay,az);
+    double a_theta = atan2(-ax,sqrt(pow(ay,2) + pow(az,2)));
     // double theta2 = asin(ax/9.81) * RAD_TO_DEG; DO NOT USE
+
+    // pitch = (0.001 * gx * DEG_TO_RAD) + pitch;
+    // roll = (0.001 * gy * DEG_TO_RAD) + roll;
+    // yaw = (0.001 * gz * DEG_TO_RAD) + yaw;   
 
 
     // Body transformation test
     // double gx_cap = gx + sin(f_phi)*tan(f_theta)*gy + cos(f_phi)*tan(f_theta)*gz;
     // double gy_cap = cos(f_phi)*gy - sin(f_phi)*gz;
 
-    /*    Complementary Filter
+// /*    Complementary Filter
 
     double gy_phi = f_phi + (gx * 0.001); 
     double gy_theta = f_phi + (gy * 0.001);
 
     double alpha = 0.05;
 
-    double f_phi = alpha * gy_phi + (1.0 - alpha) * a_phi;
-    double f_theta = alpha * gy_theta + (1.0 - alpha) * a_theta; 
+    f_phi = alpha * gy_phi + (1.0 - alpha) * a_phi;
+    f_theta = alpha * gy_theta + (1.0 - alpha) * a_theta; 
 
-    */
-
-    // xhat(:,k) = A*xhat(:, k-1);
-    mult_mat<4,4,1>(A,X,X_k1);
-
-    //   P = A*P*A'+Q;
-
-    double A_trans[4][4];
-    mat_transpose<4,4>(A,A_trans);
-
-    double P_temp[4][4];
-    mult_mat<4,4,4>(A,P,P_temp);
-    mult_mat<4,4,4>(P_temp,A_trans,P);
-    add_mat<4,4>(P,Q,P_temp);
-    assign_mat<4,4>(P_temp,P);
     
-    // H = [cosd(xhat(1,k-1)) 0; -sind(xhat(1,k-1)) 0 ; 0 1] e.g Jacobian
-    double H[5][4] = {
-        {sin(X[2][0]) * sin(X[0][0]), 0, -cos(X[2][0]) * cos(X[0][0]), 0},
-        {-cos(X[0][0]), 0, 0, 0},
-        {-cos(X[2][0]) * sin(X[0][0]), 0, -sin(X[2][0]) * cos(X[0][0]), 0},
-        {0, 1, 0, 0},
-        {0, 0, 0, 1}
-    };
-
-    // K = P*H'*inv(H*P*H'+R);
-    double H_trans[4][5];
-    mat_transpose<5,4>(H,H_trans);
-
-    double Temp1[5][4];
-    double Temp2[5][5];
-    double Temp3[5][5];
-
-    mult_mat<5,4,4>(H,P,Temp1);
-    mult_mat<5,4,5>(Temp1,H_trans,Temp2);
-    add_mat<5,5>(Temp2,R,Temp3);
-
-    double INV_holder[5][5];
-
-    // double test_inv[5][5] = {
-    //     {1, 2, 3, 4, -2},
-    //     {-5, 6, 7, 8, 4},
-    //     {9, 10, -11, 12, 1},
-    //     {13, -14, -15, 0, 9},
-    //     {20, -26, 16, -17, 25}
-    // };
-
-    INV<5>(Temp3,INV_holder);
-    // INV<5>(test_inv,INV_holder);
-    // print_mat<5,5>(INV_holder);
-
-    double Temp4[4][5];
-    mult_mat<4,4,5>(P,H_trans,Temp4);
    
-    double Kalman_gain[4][5]; 
-    mult_mat<4,5,5>(Temp4,INV_holder,Kalman_gain);
-
-    // xhat(:,k) = xhat(:,k) + K*(z(:,k) - h);
-
-    double h[5][1] = {
-        {-sin(X[2][0])*cos(X[0][0])},
-        {sin(X[0][0])},
-        {cos(X[2][0])*cos(X[0][0])},
-        {X[1][0]}, // theta dot
-        {X[3][0]} // phi dot
-    };
-
-
-    double Meas_mat[5][1] = {
-        {ax},
-        {ay},
-        {az},
-        {gx},
-        {gy}
-    };
-    
-    double TempMat_5x1[5][1];
-    sub_mat<5,1>(Meas_mat,h,TempMat_5x1);
-
-
-    double TempMat_4x1[4][1];
-    mult_mat<4,5,1>(Kalman_gain,TempMat_5x1,TempMat_4x1);
-
-    double Temp_Xhat[4][1];
-    add_mat<4,1>(X_k1,TempMat_4x1,Temp_Xhat);
-    
     // printf("\033c"); // Character to clear terminal buffer
-    // printf("%.2f,%.2f\n",a_phi,a_theta);
-    // printf("%.2f,%.2f\n",gy_phi,gy_theta);
-    // printf("%.2f,%.2f\n",f_phi * RAD_TO_DEG,f_theta * RAD_TO_DEG);
-    printf("%.2f,%.2f,%.2f,%.2f\n",Temp_Xhat[0][0] * RAD_TO_DEG,
-    Temp_Xhat[1][0] * RAD_TO_DEG,
-    Temp_Xhat[2][0] * RAD_TO_DEG,
-    Temp_Xhat[3][0] * RAD_TO_DEG);
-
-    // P = (eye(2)-K*H)*P;
-
-    double Temp6[4][4];
-    mult_mat<4,5,4>(Kalman_gain,H,Temp6);
-
-    double eye_mat[4][4] = {
-        {1, 0, 0, 0},
-        {0, 1, 0, 0},
-        {0, 0, 1, 0},
-        {0, 0, 0, 1}
-    };
+    printf("%.2f,%.2f\r",f_phi, f_theta); 
+    // printf("%.2f,%.2f,%.2f\r",pitch, roll, yaw); 
     
-    double Temp5[4][4];
-    sub_mat<4,4>(eye_mat,Temp6,Temp5);
-
-    double P_temp1[4][4];
-    assign_mat<4,4>(P,P_temp1);      
-
-    mult_mat<4,4,4>(Temp5,P_temp1,P); // P_K+1 is assigned
-
-    assign_mat<4,1>(Temp_Xhat,X); // X_k+1 assigned
     
     return true;
 }
@@ -496,110 +281,4 @@ static void i2c_default_pins(){
     // Make the I2C pins available to picotool
     bi_decl(bi_2pins_with_func(PICO_DEFAULT_I2C_SDA_PIN, PICO_DEFAULT_I2C_SCL_PIN, GPIO_FUNC_I2C));
 
-}
-
-template<std::size_t N, std::size_t M, std::size_t P>
-int mult_mat(double A[N][M], double B[M][P], double C[N][P]) {
-    
-    // int C[N][P];
-
-    for (int n = 0; n < N; n++) {
-        for (int p = 0; p < P; p++) {
-            double num = 0;
-            for (int m = 0; m < M; m++) {
-                num += A[n][m] * B[m][p];
-            }
-            C[n][p] = num;
-        }
-    }
-
-    return 0;
-}
-
-template<std::size_t N, std::size_t M>
-int mat_transpose(double A[N][M], double B[M][N]){
-
-    for (size_t i = 0; i < M; i++)
-    {
-        for (size_t j = 0; j < N; j++)
-        {
-            B[j][i] = A[i][j];
-        }
-    }
-    
-}
-
-template<std::size_t N, std::size_t M>
-int add_mat(double A[N][M], double B[N][M], double C[N][M]){
-
-    for (size_t i = 0; i < N; i++)
-    {
-        for (size_t j = 0; j < M; j++)
-        {
-            C[i][j] = A[i][j] + B[i][j];
-        }
-        
-    }
-    
-}
-
-template<std::size_t N, std::size_t M>
-int sub_mat(double A[N][M], double B[N][M], double C[N][M]){
-
-    for (size_t i = 0; i < N; i++)
-    {
-        for (size_t j = 0; j < M; j++)
-        {
-            C[i][j] = A[i][j] - B[i][j];
-        }
-        
-    }
-
-}
-
-template<std::size_t N, std::size_t M>
-int assign_mat(double A[N][M], double B[N][M]){
-   
-    for (size_t i = 0; i < N; i++)
-    {
-        for (size_t j = 0; j < M; j++)
-        {
-            B[i][j] = A[i][j];
-        }
-        
-    }
-}
-
-// INCOMPLETE
-template<std::size_t N, std::size_t M>
-int inv_mat(double A[N][M], double B[N][M]){
-    
-    if (N == M) // check for square matrix
-    {
-        double det;
-
-        for(int i = 0; i < M; i++){
-
-            
-        }
-
-        
-        return 0;
-    }   
-
-    return -1;
-}
-
-template<std::size_t N, std::size_t M>
-int print_mat(double A[N][M]){
-    
-    for (size_t i = 0; i < N; i++)
-    {
-        for (size_t j = 0; j < M; j++)
-        {
-            printf("%.2f\t",A[i][j]);
-        }
-        printf("\n");
-    }
-    
 }

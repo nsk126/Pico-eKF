@@ -7,7 +7,7 @@ include($ENV{PICO_SDK_PATH}/external/pico_sdk_import.cmake)
 # Set name of project (as PROJECT_NAME) and C/C++ standards
 project(PicoEKF C CXX ASM)
 set(CMAKE_C_STANDARD 11)
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 11)
 
 # Creates a pico-sdk subdirectory in our project for the libraries
 pico_sdk_init()
@@ -33,8 +33,13 @@ target_include_directories( FreeRTOS PUBLIC
     FreeRTOS-Kernel/include
     include/
     FreeRTOS-Kernel/portable/GCC/ARM_CM0
-    eigen/   
+    
 )
+
+target_include_directories(${PROJECT_NAME} PRIVATE
+    eigen-3.4.0/
+)
+
 # Link to pico_stdlib (gpio, time, etc. functions)
 target_link_libraries(${PROJECT_NAME} 
     pico_stdlib
