@@ -11,4 +11,4 @@ You will need to include the FreeRTOS-Kernel in your directory to build the prog
 ## Dependencies
 
 1. Download Eigen-3.4.0 to your project directory.
-    - https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz
+    - <https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz>
