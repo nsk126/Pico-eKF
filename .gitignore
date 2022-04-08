@@ -5,5 +5,8 @@ src/t2.c
 src/temp.c
 eigen/
 tttt.c
-Eigen/
+eigen-3.4.0/
 src/test.cpp
+src/31mar.cpp
+src/eigen_test.cpp
+src/sda.c
